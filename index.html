@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Call App (Multi-Call)</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+  #incoming { display:none; margin-top:10px; }
+  input, button { margin: 5px 0; }
+</style>
+</head>
+<body>
+
+<h1>Call App</h1>
+<p>Your session number: <span id="myNumber"></span></p>
+
+<input type="text" id="targetNumber" placeholder="Enter target number">
+<button id="callBtn">Call</button>
+
+<div id="incoming">
+  <p>Incoming call from <span id="callerNumber"></span></p>
+  <button id="acceptBtn">Accept</button>
+  <button id="declineBtn">Decline</button>
+</div>
+
+<audio id="localAudio" autoplay muted></audio>
+<audio id="remoteAudio" autoplay></audio>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+import { getDatabase, ref, set, onChildAdded, push, remove, get } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+
+// ==== Firebase Config ====
+const firebaseConfig = {
+  apiKey: "AIzaSyDQiRqtuItW0wBMBUnQMoWusHmNlYmmaEo",
+  authDomain: "ccaalllleerr.firebaseapp.com",
+  databaseURL: "https://ccaalllleerr-default-rtdb.firebaseio.com",
+  projectId: "ccaalllleerr",
+  storageBucket: "ccaalllleerr.appspot.com",
+  messagingSenderId: "690586386986",
+  appId: "1:690586386986:web:3871ce4166d743035cf953"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// ==== Generate random session number ====
+const myNumber = Math.floor(1000 + Math.random()*9000).toString();
+document.getElementById("myNumber").innerText = myNumber;
+const myCallsRef = ref(db, "calls/" + myNumber);
+
+let localStream;
+let pcs = {}; // store multiple RTCPeerConnections
+
+// ==== Listen for incoming calls ====
+onChildAdded(myCallsRef, async snapshot => {
+  const callId = snapshot.key;
+  const data = snapshot.val();
+  if(!data || data.status) return; // skip answered/declined calls
+
+  document.getElementById("incoming").style.display = "block";
+  document.getElementById("callerNumber").innerText = data.from;
+
+  // Store current incoming call id
+  document.getElementById("acceptBtn").dataset.callId = callId;
+  document.getElementById("declineBtn").dataset.callId = callId;
+});
+
+// ==== Accept incoming call ====
+document.getElementById("acceptBtn").onclick = async (e) => {
+  const callId = e.target.dataset.callId;
+  const callRef = ref(db, `calls/${myNumber}/${callId}`);
+  document.getElementById("incoming").style.display = "none";
+
+  localStream = await navigator.mediaDevices.getUserMedia({audio:true});
+  document.getElementById("localAudio").srcObject = localStream;
+
+  const data = (await get(callRef)).val();
+  const pc = createPeerConnection(data.from, callId);
+  pcs[callId] = pc;
+
+  await pc.setRemoteDescription(data.offer);
+
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  await set(callRef, { ...data, status: "answered", answer: pc.localDescription });
+};
+
+// ==== Decline incoming call ====
+document.getElementById("declineBtn").onclick = (e) => {
+  const callId = e.target.dataset.callId;
+  const callRef = ref(db, `calls/${myNumber}/${callId}`);
+  remove(callRef);
+  document.getElementById("incoming").style.display = "none";
+};
+
+// ==== Make a call ====
+document.getElementById("callBtn").onclick = async () => {
+  const target = document.getElementById("targetNumber").value;
+  if(!target) return alert("Enter a target number");
+
+  localStream = await navigator.mediaDevices.getUserMedia({audio:true});
+  document.getElementById("localAudio").srcObject = localStream;
+
+  const callRef = push(ref(db, "calls/" + target));
+  const callId = callRef.key;
+
+  const pc = createPeerConnection(target, callId);
+  pcs[callId] = pc;
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  await set(callRef, { type: "offer", from: myNumber, offer, status: "pending" });
+};
+
+// ==== Create RTCPeerConnection ====
+function createPeerConnection(target, callId){
+  const pc = new RTCPeerConnection();
+
+  if(localStream){
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  }
+
+  pc.ontrack = e => {
+    document.getElementById("remoteAudio").srcObject = e.streams[0];
+  };
+
+  pc.onicecandidate = event => {
+    if(event.candidate){
+      const candRef = ref(db, `calls/${target}/${callId}/candidate`);
+      set(candRef, { candidate: event.candidate });
+    }
+  };
+
+  return pc;
+}
+</script>
+
+</body>
+</html>
