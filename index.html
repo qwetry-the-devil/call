@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Dialer</title>
+<title>Call App (Multi-Call Stable)</title>
 <style>
   body { font-family: sans-serif; padding: 20px; }
   #incoming { display:none; margin-top:10px; }
@@ -11,7 +11,7 @@
 </head>
 <body>
 
-<h1>dialer v16</h1>
+<h1>Call App</h1>
 <p>Your session number: <span id="myNumber"></span></p>
 
 <input type="text" id="targetNumber" placeholder="Enter target number">
@@ -28,7 +28,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-import { getDatabase, ref, set, onChildAdded, push, remove, get } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+import { getDatabase, ref, set, onValue, push, remove, get } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
 
 // ==== Firebase Config ====
 const firebaseConfig = {
@@ -52,18 +52,19 @@ const myCallsRef = ref(db, "calls/" + myNumber);
 let localStream;
 let pcs = {}; // store multiple RTCPeerConnections
 
-// ==== Listen for incoming calls ====
-onChildAdded(myCallsRef, async snapshot => {
-  const callId = snapshot.key;
-  const data = snapshot.val();
-  if(!data || data.status) return; // skip answered/declined calls
+// ==== Listen for incoming calls (existing + new) ====
+onValue(myCallsRef, snapshot => {
+  const calls = snapshot.val();
+  if (!calls) return;
 
-  document.getElementById("incoming").style.display = "block";
-  document.getElementById("callerNumber").innerText = data.from;
-
-  // Store current incoming call id
-  document.getElementById("acceptBtn").dataset.callId = callId;
-  document.getElementById("declineBtn").dataset.callId = callId;
+  Object.entries(calls).forEach(([callId, data]) => {
+    if (!data.status && data.type === "offer") {
+      document.getElementById("incoming").style.display = "block";
+      document.getElementById("callerNumber").innerText = data.from;
+      document.getElementById("acceptBtn").dataset.callId = callId;
+      document.getElementById("declineBtn").dataset.callId = callId;
+    }
+  });
 });
 
 // ==== Accept incoming call ====
